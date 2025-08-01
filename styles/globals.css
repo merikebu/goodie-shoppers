@@ -1,0 +1,50 @@
+/* styles/globals.css */
+
+/* WARNING: This is NOT the correct way to import Tailwind CSS for modern setups. */
+/* It will prevent most Tailwind utility classes from being generated. */
+@import "tailwindcss"; 
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+
+  /* Assuming these font variables are imported elsewhere if Geist is used */
+  --font-geist-sans: sans-serif; 
+  --font-geist-mono: monospace;
+}
+
+/* WARNING: @theme is NOT a valid CSS or PostCSS directive and will be ignored. */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif; /* Fallback for fonts */
+  /* These global body styles will likely work as they are standard CSS */
+}
+
+/* Added for Next.js app structure compatibility to ensure layout fills height */
+#__next {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+.hero-background {
+  /* This URL must be relative to the `public` folder */
+  background-image: url('/images/haha.jpg');
+  background-size: cover; /* Ensures the image covers the entire area */
+  background-position: center; /* Centers the image */
+  background-repeat: no-repeat; /* Prevents the image from tiling */
+}
