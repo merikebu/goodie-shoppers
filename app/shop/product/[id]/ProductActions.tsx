@@ -59,9 +59,33 @@ export default function ProductActions({ productId }: ProductActionsProps) {
   };
 
   const handleAddToWishlist = async () => {
-    // We'll add the API route for this next, but for now, it's a placeholder
-    console.log('Add to Wishlist clicked for product:', productId);
-    showFeedback('Wishlist functionality is coming soon!', 'success');
+    if (status !== 'authenticated') {
+      router.push('/auth/login');
+      return;
+    }
+
+    setIsAddingToWishlist(true);
+
+    try {
+      const response = await fetch('/api/wishlist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ productId }),
+      });
+      
+      if (response.ok) {
+        showFeedback('Added to your wishlist!', 'success');
+        // You might want to update the heart icon to be filled here
+      } else {
+        const data = await response.json();
+        showFeedback(data.message || 'Could not add to wishlist.', 'error');
+      }
+
+    } catch (error) {
+      showFeedback('An error occurred. Please try again.', 'error');
+    } finally {
+      setIsAddingToWishlist(false);
+    }
   };
 
   return (

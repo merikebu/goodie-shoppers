@@ -1,4 +1,5 @@
 // prisma/schema.prisma
+// This is your comprehensive Prisma schema file for the "Goodie" application.
 
 generator client {
   provider = "prisma-client-js"
@@ -9,7 +10,19 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// --- NextAuth.js Models ---
+// ----------------------------------------------------------------------
+// ENUMS: Reusable type definitions for specific fields.
+// ----------------------------------------------------------------------
+enum Role {
+  USER
+  ADMIN
+}
+
+// ----------------------------------------------------------------------
+// NEXTAUTH MODELS: Core structure required for NextAuth.js authentication.
+// ----------------------------------------------------------------------
+
+// Linked social accounts (e.g., Google)
 model Account {
   id                String  @id @default(cuid())
   userId            String
@@ -24,9 +37,11 @@ model Account {
   id_token          String? @db.Text
   session_state     String?
   user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   @@unique([provider, providerAccountId])
 }
 
+// User sessions (typically used when using database session strategy)
 model Session {
   id           String   @id @default(cuid())
   sessionToken String   @unique
@@ -35,24 +50,32 @@ model Session {
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
+// The core User model with all application-specific fields
 model User {
   id                       String    @id @default(cuid())
   name                     String?
   email                    String?   @unique
-  password                 String?
+  password                 String?   // For manual email/password login
   emailVerified            DateTime?
-  image                    String?
+  image                    String?   // Profile picture URL
+
+  // User Roles: Defaults to USER on creation
+  role                     Role      @default(USER)
+
+  // Password Reset Fields
   passwordResetToken       String?   @unique
   passwordResetTokenExpiry DateTime?
+
+  // Relations
   accounts                 Account[]
   sessions                 Session[]
-  
-  // --- NEW RELATIONS FOR E-COMMERCE FEATURES ---
   cartItems                CartItem[]
   wishlistItems            WishlistItem[]
   ratings                  Rating[]
+  orders                   Order[]
 }
 
+// Tokens for email verification (e.g., magic links)
 model VerificationToken {
   identifier String
   token      String   @unique
@@ -60,65 +83,91 @@ model VerificationToken {
   @@unique([identifier, token])
 }
 
-// --- Application Models ---
+// ----------------------------------------------------------------------
+// APPLICATION-SPECIFIC E-COMMERCE MODELS
+// ----------------------------------------------------------------------
+
 model Product {
   id          String   @id @default(cuid())
   name        String
-  description String?
+  description String?  @db.Text
   price       Float
   imageUrl    String?
+  publicId    String?  // For managing images on Cloudinary
+
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  // --- NEW RELATIONS FOR E-COMMERCE FEATURES ---
+  // Relations
   cartItems     CartItem[]
   wishlistItems WishlistItem[]
   ratings       Rating[]
+  orderItems    OrderItem[]
 }
 
-// --- NEW E-COMMERCE MODELS ---
-
-// Model for items in a user's shopping cart
 model CartItem {
   id        String   @id @default(cuid())
   quantity  Int
   createdAt DateTime @default(now())
-  
+
+  // Relations
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
   productId String
   product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
 
-  @@unique([userId, productId]) // A user can only have one entry per product in their cart
+  @@unique([userId, productId]) // Ensures a product appears only once in a user's cart
 }
 
-// Model for items in a user's wishlist
 model WishlistItem {
   id        String   @id @default(cuid())
   createdAt DateTime @default(now())
 
+  // Relations
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
   productId String
   product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
 
-  @@unique([userId, productId]) // A user can only have one entry per product in their wishlist
+  @@unique([userId, productId])
 }
 
-// Model for product ratings
 model Rating {
   id        String   @id @default(cuid())
-  value     Int      // e.g., 1 to 5
+  value     Int      // e.g., a star rating from 1 to 5
   comment   String?  @db.Text
   createdAt DateTime @default(now())
 
+  // Relations
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
   productId String
   product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
 
-  @@unique([userId, productId]) // A user can only rate a product once
+  @@unique([userId, productId]) // A user can only rate a specific product once
+}
+
+model Order {
+  id         String   @id @default(cuid())
+  total      Float
+  status     String   @default("PENDING") // e.g., PENDING, SHIPPED, DELIVERED, CANCELED
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  // Relations
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orderItems OrderItem[]
+}
+
+model OrderItem {
+  id        String   @id @default(cuid())
+  quantity  Int
+  price     Float    // The price of the product at the time the order was placed
+
+  // Relations
+  orderId   String
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Restrict)
 }
