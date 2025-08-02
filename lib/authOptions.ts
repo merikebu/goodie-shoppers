@@ -6,7 +6,6 @@ import prisma from './prisma';
 import { comparePassword } from './password';
 
 // ----- TypeScript Augmentations to add `role` to NextAuth types -----
-// This ensures TypeScript recognizes our custom properties on the session and user.
 declare module 'next-auth' {
   interface Session {
     user: {
@@ -49,7 +48,6 @@ export const authOptions: NextAuthOptions = {
         const isValid = await comparePassword(credentials.password, user.password);
         if (!isValid) throw new Error('Invalid credentials.');
 
-        // On successful credential auth, return the user object from the DB with the role
         return {
           id: user.id,
           name: user.name,
@@ -61,8 +59,17 @@ export const authOptions: NextAuthOptions = {
     }),
   ],
 
+  // -------------------------------------------------------------
+  // UPDATED SESSION CONFIGURATION
+  // -------------------------------------------------------------
   session: {
     strategy: 'jwt',
+    // Set the maximum session age for an idle session to 30 minutes (in seconds)
+    maxAge: 30 * 60, // 30 minutes
+
+    // Optional but recommended: Check the session for validity more frequently
+    // This will extend the session if the user is active.
+    updateAge: 24 * 60 * 60, // 24 hours (can be shorter, like every 10 mins: 10 * 60)
   },
   
   secret: process.env.NEXTAUTH_SECRET,
@@ -76,50 +83,117 @@ export const authOptions: NextAuthOptions = {
   // -------------------------------------------------------------
   callbacks: {
     /**
-     * The `jwt` callback is the most crucial place to manage what gets
-     * encrypted inside the session cookie (JWT).
+     * The `signIn` callback is crucial for linking OAuth accounts.
+     * It runs before the JWT is created.
      */
-    async jwt({ token, user, account }) {
-      // On initial sign-in, the `user` object from the provider is available.
-      if (user) {
-        // NextAuth automatically puts the user ID in `token.sub`. We don't need to set it.
-        
-        // Add the role from the user object to the token.
-        // For 'credentials', `user.role` is already here from `authorize`.
-        // For OAuth providers, we need to fetch it.
-        token.role = (user as NextAuthUser & { role?: string }).role;
+    async signIn({ user, account, profile }) {
+      // Allow standard credentials sign-in to proceed.
+      if (account?.provider === 'credentials') {
+        return true;
       }
       
-      // SPECIAL CASE: For Google/OAuth on initial sign-in, the role might be missing.
-      // We fetch it from the database here to ensure the token is complete.
-      if (account?.provider === 'google' && !token.role) {
-        console.log("[JWT Callback] OAuth sign-in detected, re-fetching role from DB to ensure token is complete.");
-        const dbUser = await prisma.user.findUnique({
-          where: { email: token.email! },
-        });
-        if (dbUser) {
-          token.role = dbUser.role; // Add the role directly to the token
-          console.log("[JWT Callback] Role for OAuth user set to:", dbUser.role);
+      // Handle OAuth sign-ins, specifically for linking to existing accounts.
+      if (account?.provider === 'google') {
+        if (!profile?.email) {
+          throw new Error("Profile email not found in Google OAuth response.");
+        }
+        
+        try {
+          // Find if a user with this email already exists in our database.
+          let dbUser = await prisma.user.findUnique({
+            where: { email: profile.email },
+          });
+
+          if (dbUser) {
+            // --- LOGIC FOR EXISTING USER (INCLUDING ADMINS) ---
+            console.log(`[Sign In] OAuth user found in DB: ${profile.email}, Role: ${dbUser.role}`);
+            
+            // Link the new Google account to the existing user record
+            // This prevents duplicate accounts and ensures roles are preserved.
+            await prisma.account.upsert({
+                where: {
+                    provider_providerAccountId: {
+                        provider: 'google',
+                        providerAccountId: account.providerAccountId!,
+                    },
+                },
+                update: { userId: dbUser.id },
+                create: {
+                    userId: dbUser.id,
+                    type: account.type!,
+                    provider: account.provider,
+                    providerAccountId: account.providerAccountId!,
+                    access_token: account.access_token,
+                    refresh_token: account.refresh_token,
+                    expires_at: account.expires_at,
+                    scope: account.scope,
+                    token_type: account.token_type,
+                    id_token: account.id_token,
+                }
+            });
+            
+            // IMPORTANT: Attach the existing role to the user object being processed by NextAuth.
+            // This is crucial for the `jwt` and `redirect` callbacks to work correctly for admins.
+            (user as NextAuthUser & { role?: string }).role = dbUser.role;
+
+          } else {
+            // --- LOGIC FOR NEW OAUTH USER ---
+            // If the user does not exist, create them. They will get the default 'USER' role from the schema.
+            dbUser = await prisma.user.create({
+                data: {
+                    name: profile.name,
+                    email: profile.email,
+                    image: profile.image || (profile as any).picture,
+                    emailVerified: new Date(),
+                    accounts: {
+                        create: [{
+                            type: account.type!,
+                            provider: account.provider,
+                            providerAccountId: account.providerAccountId!,
+                            access_token: account.access_token,
+                            refresh_token: account.refresh_token,
+                            expires_at: account.expires_at,
+                            scope: account.scope,
+                            token_type: account.token_type,
+                            id_token: account.id_token,
+                        }]
+                    }
+                },
+                include: { accounts: true }
+            });
+            console.log(`[Sign In] New OAuth user created in DB: ${dbUser.email}, Role: ${dbUser.role}`);
+          }
+          return true; // Allow the sign-in
+
+        } catch (error) {
+          console.error("Error during OAuth sign-in processing:", error);
+          return false; // Block sign-in on error
         }
       }
-      
+
+      return false; // Block sign-in for any unhandled providers
+    },
+    
+    /**
+     * The `jwt` callback creates the encrypted session token.
+     */
+    async jwt({ token, user }) {
+      // On the initial sign-in, the `user` object is available.
+      // We persist its `role` to the token.
+      if (user) {
+        token.role = (user as NextAuthUser & { role?: string }).role;
+      }
       return token;
     },
     
     /**
-     * The `session` callback controls what data is exposed to the client-side
-     * from the token. We take the `id` and `role` from the token and add them here.
+     * The `session` callback exposes data from the token to the client-side.
      */
     async session({ session, token }) {
       if (session.user) {
-        // 1. Get the user ID from the token's `sub` claim. This is ESSENTIAL.
         session.user.id = token.sub!;
-        
-        // 2. Get the role from the token.
         (session.user as any).role = token.role;
       }
-      
-      console.log("[Session Callback] Final session object being sent to client:", session);
       return session;
     },
   },

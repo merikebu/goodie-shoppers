@@ -1,10 +1,10 @@
-// app/api/cart/items/route.ts
+// app/api/wishlist/items/route.ts
 import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/authOptions';
 import prisma from '@/lib/prisma';
 
-// GET: Fetch all items from the current user's cart
+// GET: Fetch all items from the current user's wishlist
 export async function GET(req: Request) {
     const session = await getServerSession(authOptions);
     if (!session?.user?.id) {
@@ -14,22 +14,22 @@ export async function GET(req: Request) {
     try {
         const userId = session.user.id;
         
-        const cartItems = await prisma.cartItem.findMany({
+        const wishlistItems = await prisma.wishlistItem.findMany({
             where: {
                 userId: userId,
             },
             include: {
-                product: true, // Include the full product details for each cart item
+                product: true, // Include the full product details
             },
             orderBy: {
-                createdAt: 'asc',
+                createdAt: 'desc',
             },
         });
         
-        return NextResponse.json(cartItems, { status: 200 });
+        return NextResponse.json(wishlistItems, { status: 200 });
 
     } catch (error) {
-        console.error('[API CART GET] Error:', error);
+        console.error('[API WISHLIST GET] Error:', error);
         return NextResponse.json({ message: 'An unexpected error occurred.' }, { status: 500 });
     }
 }
